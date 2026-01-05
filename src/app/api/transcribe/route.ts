@@ -1,60 +1,53 @@
 import { NextResponse } from "next/server";
 import * as sdk from "microsoft-cognitiveservices-speech-sdk";
-import fs from "fs";
-import path from "path";
-import os from "os";
 
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
-    const audioFile = formData.get("audio") as File;
+    const file = formData.get("file") as File;
 
-    if (!audioFile) {
-      return NextResponse.json(
-        { error: "No audio file provided" },
-        { status: 400 }
-      );
+    if (!file) {
+      return NextResponse.json({ error: "No audio provided" }, { status: 400 });
     }
 
-    const arrayBuffer = await audioFile.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-    const tempFilePath = path.join(os.tmpdir(), `input-${Date.now()}.wav`);
-    fs.writeFileSync(tempFilePath, buffer);
-
-    // 3. Configure Azure Speech
     const speechConfig = sdk.SpeechConfig.fromSubscription(
       process.env.AZURE_SPEECH_KEY!,
       process.env.AZURE_SPEECH_REGION!
     );
     speechConfig.speechRecognitionLanguage = "en-US";
 
-    const audioConfig = sdk.AudioConfig.fromWavFileInput(tempFilePath);
-    const speechRecognizer = new sdk.SpeechRecognizer(
-      speechConfig,
-      audioConfig
-    );
+    // FIX: Using PushAudioInputStream to handle the buffer correctly without type errors
+    const pushStream = sdk.AudioInputStream.createPushStream();
+    pushStream.write(buffer);
+    pushStream.close();
 
-    const text = await new Promise<string>((resolve, reject) => {
-      speechRecognizer.recognizeOnceAsync(
+    const audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
+    const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+
+    const transcription = await new Promise<string>((resolve, reject) => {
+      recognizer.recognizeOnceAsync(
         (result) => {
-          speechRecognizer.close();
-          fs.unlinkSync(tempFilePath);
-          resolve(result.text);
+          recognizer.close();
+          if (result.reason === sdk.ResultReason.RecognizedSpeech) {
+            resolve(result.text);
+          } else {
+            reject("Speech not recognized");
+          }
         },
         (err) => {
-          speechRecognizer.close();
-          fs.unlinkSync(tempFilePath);
+          recognizer.close();
           reject(err);
         }
       );
     });
 
-    return NextResponse.json({ text });
+    return NextResponse.json({ text: transcription });
   } catch (error) {
-    console.error("Transcription error:", error);
+    console.error("Transcription Error:", error);
     return NextResponse.json(
-      { error: "Failed to process audio" },
+      { error: "Transcription failed" },
       { status: 500 }
     );
   }
