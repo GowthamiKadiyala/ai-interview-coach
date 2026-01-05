@@ -10,7 +10,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No audio provided" }, { status: 400 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    // 1. Get the file as an ArrayBuffer directly to avoid Buffer conversion issues
+    const arrayBuffer = await file.arrayBuffer();
 
     const speechConfig = sdk.SpeechConfig.fromSubscription(
       process.env.AZURE_SPEECH_KEY!,
@@ -18,9 +19,11 @@ export async function POST(req: Request) {
     );
     speechConfig.speechRecognitionLanguage = "en-US";
 
-    // FIX: Using PushAudioInputStream to handle the buffer correctly without type errors
+    // 2. Initialize the PushStream
     const pushStream = sdk.AudioInputStream.createPushStream();
-    pushStream.write(buffer);
+
+    // 3. Convert ArrayBuffer to Uint8Array to satisfy the SDK's internal expectations
+    pushStream.write(new Uint8Array(arrayBuffer).buffer as ArrayBuffer);
     pushStream.close();
 
     const audioConfig = sdk.AudioConfig.fromStreamInput(pushStream);
@@ -33,7 +36,7 @@ export async function POST(req: Request) {
           if (result.reason === sdk.ResultReason.RecognizedSpeech) {
             resolve(result.text);
           } else {
-            reject("Speech not recognized");
+            reject("Speech not recognized: " + result.reason);
           }
         },
         (err) => {
