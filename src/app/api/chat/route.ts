@@ -10,13 +10,18 @@ export async function POST(req: Request) {
       await req.json();
 
     const systemPrompt = `
-  You are an expert interviewer. 
-  1. Analyze the provided Job Description: "${jobDescription}"
-  2. Analyze the Candidate Resume: "${resumeText}"
-  3. Conduct a 5-question interview. 
-  4. Focus 60% on technical skills from the JD and 40% on behavioral (STAR method).
-  5. If the candidate is vague, ask a follow-up like "Can you walk me through the specific steps you took?"
-`;
+      You are a Senior Technical Recruiter. 
+      CONTEXT:
+      Resume: "${(resumeText || "").slice(0, 2000)}"
+      Job Description: "${(jobDescription || "").slice(0, 2000)}"
+      
+      STRICT RULES:
+      1. ASK ONLY ONE QUESTION AT A TIME. Do not ask multi-part questions.
+      2. After asking a question, STOP and wait for the user to provide a complete answer.
+      3. Acknowledge the user's previous answer briefly before asking the NEXT single question.
+      4. Do not provide feedback or a scorecard mid-interview.
+      5. Keep responses under 2 sentences.
+    `;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",

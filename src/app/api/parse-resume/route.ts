@@ -6,48 +6,48 @@ export async function POST(req: Request) {
     const formData = await req.formData();
     const file = formData.get("file") as File;
 
-    if (!file)
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    if (!file) {
+      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const pdfParser = new PDFParser(null, 1); // Mode 1: Raw text extraction
+
+    // 1. Initialize the parser correctly for TypeScript/Next.js
+    const pdfParser = new (PDFParser as any)(null, true);
 
     const parsedText = await new Promise<string>((resolve, reject) => {
-      pdfParser.on("pdfParser_dataError", (errData: any) =>
-        reject(errData.parserError)
-      );
-
+      // 2. Safe data processing to prevent URI malformed crashes
       pdfParser.on("pdfParser_dataReady", (pdfData: any) => {
-        try {
-          // Check both standard locations for 'Pages' data
-          const pages = pdfData.Pages || pdfData.formImage?.Pages;
-          if (!pages) return reject("No text found in PDF");
-
-          const text = pages
-            .map((page: any) => {
-              return page.Texts.map((t: any) => {
-                try {
-                  // Safety check for malformed characters
-                  return decodeURIComponent(t.R[0].T);
-                } catch {
-                  return t.R[0].T;
-                }
-              }).join(" ");
+        const rawText = pdfData.Pages.flatMap((page: any) =>
+          page.Texts.flatMap((text: any) =>
+            text.R.map((r: any) => {
+              try {
+                // Try to decode normally
+                return decodeURIComponent(r.T);
+              } catch (e) {
+                // Fallback to raw text if it's a malformed character
+                return r.T;
+              }
             })
-            .join("\n\n");
-
-          resolve(text);
-        } catch (err) {
-          reject("Extraction failed");
-        }
+          )
+        ).join(" ");
+        resolve(rawText);
       });
 
+      pdfParser.on("pdfParser_dataError", (errData: any) => {
+        reject(errData.parserError);
+      });
+
+      // 3. Start the parsing process
       pdfParser.parseBuffer(buffer);
     });
 
     return NextResponse.json({ text: parsedText });
   } catch (error) {
-    console.error("PDF Parser Error:", error);
-    return NextResponse.json({ error: "Failed to parse PDF" }, { status: 500 });
+    console.error("API Error:", error);
+    return NextResponse.json(
+      { error: "Server failed to process PDF" },
+      { status: 500 }
+    );
   }
 }
